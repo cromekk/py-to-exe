@@ -40,7 +40,7 @@ class ConverterApp(ttk.Frame):
         self.master.geometry("940x680")
         self.master.minsize(820, 600)
         self.master.configure(bg="#f4f6f8")
-        self.master.option_add("*Font", "Segoe UI 10")
+        self.master.option_add("*Font", "{Segoe UI} 10")
 
         style = ttk.Style(self.master)
         style.theme_use("clam")
@@ -52,7 +52,7 @@ class ConverterApp(ttk.Frame):
         style.configure("Muted.TLabel", background="#f4f6f8", foreground="#6b7280")
         style.configure("CardMuted.TLabel", background="#ffffff", foreground="#6b7280")
         style.configure("Card.TLabelframe", background="#ffffff", bordercolor="#d8dee8", relief="solid")
-        style.configure("Card.TLabelframe.Label", background="#ffffff", foreground="#111827", font=("Segoe UI Semibold", 10))
+        style.configure("Card.TLabelframe.Label", background="#ffffff", foreground="#111827", font=("Segoe UI", 10, "bold"))
         style.configure("TEntry", fieldbackground="#ffffff", bordercolor="#cfd7e3", lightcolor="#cfd7e3", darkcolor="#cfd7e3", padding=6)
         style.configure("TButton", padding=(10, 6), background="#ffffff", bordercolor="#cfd7e3")
         style.configure("Accent.TButton", padding=(14, 8), background="#111827", foreground="#ffffff", bordercolor="#111827")
@@ -74,7 +74,7 @@ class ConverterApp(ttk.Frame):
         frame.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         frame.columnconfigure(0, weight=1)
 
-        title = ttk.Label(frame, text="Python to EXE Converter", style="Top.TLabel", font=("Segoe UI Semibold", 15))
+        title = ttk.Label(frame, text="Python to EXE Converter", style="Top.TLabel", font=("Segoe UI", 15, "bold"))
         title.grid(row=0, column=0, sticky="w")
 
         self.build_button = ttk.Button(frame, text="Build EXE", style="Accent.TButton", command=self.start_build)
@@ -302,5 +302,6 @@ def main() -> None:
     root = tk.Tk()
     ConverterApp(root)
     root.mainloop()
+
 
 

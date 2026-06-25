@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import ctypes
+import os
 import queue
 import sys
 import threading
@@ -10,7 +11,15 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Callable, List, Optional
 
-from .builder import BuildConfig, BuildError, DataItem, build_executable
+from .builder import (
+    BuildConfig,
+    BuildError,
+    DataItem,
+    build_executable,
+    command_preview,
+    pyinstaller_available,
+    validate_config,
+)
 
 
 class ConverterApp(ttk.Frame):
@@ -26,10 +35,12 @@ class ConverterApp(ttk.Frame):
         self.app_type_var = tk.StringVar(value="console")
         self.clean_var = tk.BooleanVar(value=True)
         self.extra_args_var = tk.StringVar()
+        self.status_var = tk.StringVar(value="Ready")
 
         self.data_items: List[DataItem] = []
         self.events: queue.Queue = queue.Queue()
         self.worker: Optional[threading.Thread] = None
+        self.last_exe_path: Optional[Path] = None
 
         self.configure_window()
         self.create_widgets()
@@ -37,28 +48,31 @@ class ConverterApp(ttk.Frame):
 
     def configure_window(self) -> None:
         self.master.title("Python to EXE Converter")
-        self.master.geometry("940x680")
-        self.master.minsize(820, 600)
-        self.master.configure(bg="#f4f6f8")
+        self.master.geometry("980x740")
+        self.master.minsize(860, 660)
+        self.master.configure(bg="#eef2f7")
         self.master.option_add("*Font", "{Segoe UI} 10")
 
         style = ttk.Style(self.master)
         style.theme_use("clam")
-        style.configure(".", font=("Segoe UI", 10), background="#f4f6f8", foreground="#111827")
-        style.configure("Shell.TFrame", background="#f4f6f8")
-        style.configure("Top.TFrame", background="#111827")
-        style.configure("Top.TLabel", background="#111827", foreground="#ffffff")
+        style.configure(".", font=("Segoe UI", 10), background="#eef2f7", foreground="#111827")
+        style.configure("Shell.TFrame", background="#eef2f7")
+        style.configure("Header.TFrame", background="#101827")
+        style.configure("Header.TLabel", background="#101827", foreground="#ffffff")
+        style.configure("HeaderMuted.TLabel", background="#101827", foreground="#aab3c2")
         style.configure("Card.TFrame", background="#ffffff")
-        style.configure("Muted.TLabel", background="#f4f6f8", foreground="#6b7280")
-        style.configure("CardMuted.TLabel", background="#ffffff", foreground="#6b7280")
-        style.configure("Card.TLabelframe", background="#ffffff", bordercolor="#d8dee8", relief="solid")
+        style.configure("CardMuted.TLabel", background="#ffffff", foreground="#5f6b7a")
+        style.configure("Status.TLabel", background="#eef2f7", foreground="#536173")
+        style.configure("Card.TLabelframe", background="#ffffff", borderwidth=1, relief="solid", bordercolor="#c9d2df")
         style.configure("Card.TLabelframe.Label", background="#ffffff", foreground="#111827", font=("Segoe UI", 10, "bold"))
-        style.configure("TEntry", fieldbackground="#ffffff", bordercolor="#cfd7e3", lightcolor="#cfd7e3", darkcolor="#cfd7e3", padding=6)
-        style.configure("TButton", padding=(10, 6), background="#ffffff", bordercolor="#cfd7e3")
-        style.configure("Accent.TButton", padding=(14, 8), background="#111827", foreground="#ffffff", bordercolor="#111827")
-        style.map("Accent.TButton", background=[("active", "#2563eb"), ("disabled", "#9ca3af")])
+        style.configure("TEntry", fieldbackground="#ffffff", bordercolor="#cbd5e1", lightcolor="#cbd5e1", darkcolor="#cbd5e1", padding=7)
+        style.configure("TButton", padding=(10, 6), background="#ffffff", bordercolor="#cbd5e1")
+        style.configure("Accent.TButton", padding=(16, 8), background="#2563eb", foreground="#ffffff", bordercolor="#2563eb")
+        style.configure("Ghost.TButton", padding=(10, 6), background="#101827", foreground="#ffffff", bordercolor="#3b4556")
         style.configure("Slim.TRadiobutton", background="#ffffff")
         style.configure("Slim.TCheckbutton", background="#ffffff")
+        style.map("Accent.TButton", background=[("active", "#1d4ed8"), ("disabled", "#93a4bd")])
+        style.map("Ghost.TButton", background=[("active", "#1f2937")])
 
         self.pack(fill="both", expand=True)
         self.columnconfigure(0, weight=1)
@@ -68,17 +82,22 @@ class ConverterApp(ttk.Frame):
         self.create_header()
         self.create_main_area()
         self.create_log_area()
+        self.create_status_bar()
 
     def create_header(self) -> None:
-        frame = ttk.Frame(self, style="Top.TFrame", padding=(16, 12))
+        frame = ttk.Frame(self, style="Header.TFrame", padding=(18, 14))
         frame.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         frame.columnconfigure(0, weight=1)
 
-        title = ttk.Label(frame, text="Python to EXE Converter", style="Top.TLabel", font=("Segoe UI", 15, "bold"))
+        title = ttk.Label(frame, text="Python to EXE Converter", style="Header.TLabel", font=("Segoe UI", 16, "bold"))
         title.grid(row=0, column=0, sticky="w")
 
+        subtitle = ttk.Label(frame, text="Build clean Windows executables with PyInstaller", style="HeaderMuted.TLabel")
+        subtitle.grid(row=1, column=0, sticky="w", pady=(2, 0))
+
+        ttk.Button(frame, text="Check Setup", style="Ghost.TButton", command=self.check_setup).grid(row=0, column=1, rowspan=2, sticky="e", padx=(0, 8))
         self.build_button = ttk.Button(frame, text="Build EXE", style="Accent.TButton", command=self.start_build)
-        self.build_button.grid(row=0, column=1, sticky="e")
+        self.build_button.grid(row=0, column=2, rowspan=2, sticky="e")
 
     def create_main_area(self) -> None:
         grid = ttk.Frame(self, style="Shell.TFrame")
@@ -86,39 +105,38 @@ class ConverterApp(ttk.Frame):
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
 
-        self.create_file_card(grid)
-        self.create_options_card(grid)
+        self.create_input_card(grid)
+        self.create_build_card(grid)
         self.create_advanced_card(grid)
 
-    def create_file_card(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Files", padding=12, style="Card.TLabelframe")
-        frame.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+    def create_input_card(self, parent: ttk.Frame) -> None:
+        frame = self.card(parent, "Input and output", row=0, column=0, padx=(0, 7))
         frame.columnconfigure(1, weight=1)
 
-        self.create_path_row(frame, 0, "Script", self.source_var, self.choose_source)
-        self.create_path_row(frame, 1, "Output", self.output_var, self.choose_output)
-        self.create_path_row(frame, 2, "Icon", self.icon_var, self.choose_icon)
+        self.create_path_row(frame, 0, "Python file", self.source_var, self.choose_source)
+        self.create_path_row(frame, 1, "Output folder", self.output_var, self.choose_output)
+        self.create_path_row(frame, 2, "EXE icon (.ico)", self.icon_var, self.choose_icon)
 
-        clear_icon = ttk.Button(frame, text="Clear", command=lambda: self.icon_var.set(""))
-        clear_icon.grid(row=2, column=3, sticky="ew", padx=(6, 0))
+        ttk.Button(frame, text="Clear", command=lambda: self.icon_var.set("")).grid(row=2, column=3, sticky="ew", padx=(6, 0), pady=(0, 8))
+        ttk.Button(frame, text="Open Output Folder", command=self.open_output_folder).grid(row=3, column=1, sticky="w", pady=(4, 0), padx=(10, 0))
 
-    def create_options_card(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Build", padding=12, style="Card.TLabelframe")
-        frame.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+    def create_build_card(self, parent: ttk.Frame) -> None:
+        frame = self.card(parent, "EXE settings", row=0, column=1, padx=(7, 0))
         frame.columnconfigure(1, weight=1)
 
-        ttk.Label(frame, text="App name").grid(row=0, column=0, sticky="w", pady=(0, 8))
-        ttk.Entry(frame, textvariable=self.name_var).grid(row=0, column=1, sticky="ew", pady=(0, 8))
+        ttk.Label(frame, text="EXE name").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(frame, textvariable=self.name_var).grid(row=0, column=1, sticky="ew", pady=(0, 8), padx=(10, 0))
 
-        ttk.Radiobutton(frame, text="One-file executable", variable=self.package_var, value="onefile", style="Slim.TRadiobutton").grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
-        ttk.Radiobutton(frame, text="Folder build", variable=self.package_var, value="folder", style="Slim.TRadiobutton").grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        ttk.Radiobutton(frame, text="Console app", variable=self.app_type_var, value="console", style="Slim.TRadiobutton").grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 0))
-        ttk.Radiobutton(frame, text="Windowed app (no console)", variable=self.app_type_var, value="windowed", style="Slim.TRadiobutton").grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        ttk.Checkbutton(frame, text="Clean build", variable=self.clean_var, style="Slim.TCheckbutton").grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Radiobutton(frame, text="Single EXE file", variable=self.package_var, value="onefile", style="Slim.TRadiobutton").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Radiobutton(frame, text="EXE folder with support files", variable=self.package_var, value="folder", style="Slim.TRadiobutton").grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Radiobutton(frame, text="Console window visible", variable=self.app_type_var, value="console", style="Slim.TRadiobutton").grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Radiobutton(frame, text="Windowed app, no console", variable=self.app_type_var, value="windowed", style="Slim.TRadiobutton").grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(frame, text="Start from a clean PyInstaller build", variable=self.clean_var, style="Slim.TCheckbutton").grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
+        ttk.Button(frame, text="Copy Build Command", command=self.copy_build_command).grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
 
     def create_advanced_card(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Advanced", padding=12, style="Card.TLabelframe")
-        frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        frame = self.card(parent, "Advanced options", row=1, column=0, columnspan=2, pady=(14, 0))
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
@@ -126,39 +144,56 @@ class ConverterApp(ttk.Frame):
         imports_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         imports_frame.columnconfigure(0, weight=1)
 
-        ttk.Label(imports_frame, text="Hidden imports", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
-        self.hidden_imports_box = ScrolledText(imports_frame, height=4, wrap="word", relief="flat", bd=1, font=("Segoe UI", 10))
+        ttk.Label(imports_frame, text="Hidden imports, one per line", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        self.hidden_imports_box = ScrolledText(imports_frame, height=4, wrap="word", relief="solid", bd=1, font=("Segoe UI", 10), bg="#ffffff", highlightthickness=1, highlightbackground="#cbd5e1")
         self.hidden_imports_box.grid(row=1, column=0, sticky="ew")
 
         data_frame = ttk.Frame(frame, style="Card.TFrame")
         data_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         data_frame.columnconfigure(0, weight=1)
 
-        ttk.Label(data_frame, text="Data files", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
-        self.data_list = tk.Listbox(data_frame, height=4, relief="flat", bd=1, bg="#ffffff", fg="#111827", highlightthickness=1, highlightbackground="#cfd7e3", selectbackground="#2563eb")
+        ttk.Label(data_frame, text="Files or folders your app needs", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        self.data_list = tk.Listbox(data_frame, height=4, relief="solid", bd=1, bg="#ffffff", fg="#111827", highlightthickness=1, highlightbackground="#cbd5e1", selectbackground="#2563eb")
         self.data_list.grid(row=1, column=0, sticky="ew")
 
         data_buttons = ttk.Frame(data_frame, style="Card.TFrame")
         data_buttons.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(data_buttons, text="Add file", command=self.add_data_file).pack(side="left")
-        ttk.Button(data_buttons, text="Add folder", command=self.add_data_folder).pack(side="left", padx=(6, 0))
+        ttk.Button(data_buttons, text="Add File", command=self.add_data_file).pack(side="left")
+        ttk.Button(data_buttons, text="Add Folder", command=self.add_data_folder).pack(side="left", padx=(6, 0))
         ttk.Button(data_buttons, text="Remove", command=self.remove_data_item).pack(side="left", padx=(6, 0))
 
         extras = ttk.Frame(frame, style="Card.TFrame")
         extras.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         extras.columnconfigure(1, weight=1)
 
-        ttk.Label(extras, text="Extra PyInstaller args", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(extras, text="Extra PyInstaller options", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
         ttk.Entry(extras, textvariable=self.extra_args_var).grid(row=0, column=1, sticky="ew")
 
     def create_log_area(self) -> None:
-        frame = ttk.LabelFrame(self, text="Log", padding=12, style="Card.TLabelframe")
-        frame.grid(row=2, column=0, sticky="nsew")
-        frame.rowconfigure(0, weight=1)
+        frame = self.card(self, "Build log", row=2, column=0, sticky="nsew")
+        frame.rowconfigure(1, weight=1)
         frame.columnconfigure(0, weight=1)
 
+        toolbar = ttk.Frame(frame, style="Card.TFrame")
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        toolbar.columnconfigure(0, weight=1)
+
+        ttk.Label(toolbar, text="Progress and PyInstaller output", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Button(toolbar, text="Clear Log", command=self.clear_log).grid(row=0, column=1, padx=(8, 0))
+        ttk.Button(toolbar, text="Save Log", command=self.save_log).grid(row=0, column=2, padx=(6, 0))
+
         self.log_box = ScrolledText(frame, wrap="word", height=12, relief="flat", bd=0, bg="#0f172a", fg="#e5e7eb", insertbackground="#ffffff", font=("Cascadia Mono", 9))
-        self.log_box.grid(row=0, column=0, sticky="nsew")
+        self.log_box.grid(row=1, column=0, sticky="nsew")
+
+    def create_status_bar(self) -> None:
+        ttk.Label(self, textvariable=self.status_var, style="Status.TLabel").grid(row=3, column=0, sticky="ew", pady=(8, 0))
+
+    def card(self, parent: ttk.Widget, title: str, **grid_options) -> ttk.LabelFrame:
+        frame = ttk.LabelFrame(parent, text=title, padding=14, style="Card.TLabelframe")
+        options = {"sticky": "nsew"}
+        options.update(grid_options)
+        frame.grid(**options)
+        return frame
 
     def create_path_row(self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar, command: Callable[[], None]) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=(0, 8))
@@ -178,7 +213,7 @@ class ConverterApp(ttk.Frame):
             self.output_var.set(path)
 
     def choose_icon(self) -> None:
-        path = filedialog.askopenfilename(title="Select icon", filetypes=[("Windows icons", "*.ico"), ("All files", "*.*")])
+        path = filedialog.askopenfilename(title="Select EXE icon", filetypes=[("Windows icons", "*.ico"), ("All files", "*.*")])
         if path:
             self.icon_var.set(path)
 
@@ -193,7 +228,7 @@ class ConverterApp(ttk.Frame):
             self.add_data_item(Path(path))
 
     def add_data_item(self, source: Path) -> None:
-        destination = simpledialog.askstring("Data destination", "Folder inside the app:", initialvalue=".")
+        destination = simpledialog.askstring("Data destination", "Folder inside the EXE:", initialvalue=".")
         if destination is None:
             return
 
@@ -221,13 +256,15 @@ class ConverterApp(ttk.Frame):
 
         try:
             config = self.current_config()
+            validate_config(config)
         except BuildError as error:
             messagebox.showerror("Cannot build", str(error))
             return
 
-        self.log_box.delete("1.0", tk.END)
+        self.last_exe_path = None
+        self.clear_log()
         self.write_log("Starting build...\n")
-        self.build_button.state(["disabled"])
+        self.set_busy(True)
 
         self.worker = threading.Thread(target=self.run_build, args=(config,), daemon=True)
         self.worker.start()
@@ -256,6 +293,64 @@ class ConverterApp(ttk.Frame):
         else:
             self.events.put(("finished", str(exe_path)))
 
+    def check_setup(self) -> None:
+        pyinstaller_text = "installed" if pyinstaller_available() else "not installed yet"
+        message = f"Python: {sys.version.split()[0]}\nPyInstaller: {pyinstaller_text}"
+        self.write_log("\nSetup check\n" + message + "\n")
+        messagebox.showinfo("Setup check", message)
+
+    def copy_build_command(self) -> None:
+        try:
+            command = command_preview(self.current_config())
+        except BuildError as error:
+            messagebox.showerror("Cannot copy command", str(error))
+            return
+
+        self.master.clipboard_clear()
+        self.master.clipboard_append(command)
+        self.status_var.set("Build command copied to clipboard")
+        self.write_log("\nBuild command copied to clipboard.\n")
+
+    def open_output_folder(self) -> None:
+        path = self.output_folder_to_open()
+
+        if not path or not path.exists():
+            messagebox.showerror("Output folder", "Choose an output folder first.")
+            return
+
+        os.startfile(str(path))
+
+    def output_folder_to_open(self) -> Optional[Path]:
+        if self.last_exe_path:
+            return self.last_exe_path.parent
+
+        if self.output_var.get().strip():
+            return Path(self.output_var.get())
+
+        return None
+
+    def save_log(self) -> None:
+        text = self.log_box.get("1.0", tk.END).strip()
+        if not text:
+            messagebox.showinfo("Save log", "The log is empty.")
+            return
+
+        path = filedialog.asksaveasfilename(title="Save build log", defaultextension=".txt", filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if path:
+            Path(path).write_text(text + "\n", encoding="utf-8")
+            self.status_var.set("Build log saved")
+
+    def clear_log(self) -> None:
+        self.log_box.delete("1.0", tk.END)
+
+    def set_busy(self, busy: bool) -> None:
+        if busy:
+            self.build_button.state(["disabled"])
+            self.status_var.set("Building...")
+        else:
+            self.build_button.state(["!disabled"])
+            self.status_var.set("Ready")
+
     def queue_log(self, message: str) -> None:
         self.events.put(("log", message))
 
@@ -271,11 +366,14 @@ class ConverterApp(ttk.Frame):
                 if event == "log":
                     self.write_log(value)
                 elif event == "finished":
-                    self.build_button.state(["!disabled"])
+                    self.set_busy(False)
+                    self.last_exe_path = Path(value)
+                    self.status_var.set("Build complete")
                     self.write_log("\nBuild complete.\n")
                     messagebox.showinfo("Build complete", "Created:\n" + value)
                 elif event == "failed":
-                    self.build_button.state(["!disabled"])
+                    self.set_busy(False)
+                    self.status_var.set("Build failed")
                     self.write_log("\nBuild failed.\n" + value + "\n")
                     messagebox.showerror("Build failed", value)
         except queue.Empty:
@@ -302,6 +400,4 @@ def main() -> None:
     root = tk.Tk()
     ConverterApp(root)
     root.mainloop()
-
-
 

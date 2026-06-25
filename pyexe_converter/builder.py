@@ -46,28 +46,28 @@ def build_executable(config: BuildConfig, log: LogHandler) -> Path:
     with tempfile.TemporaryDirectory(prefix="pyinstaller-build-") as temp_dir:
         command = pyinstaller_command(config, Path(temp_dir))
         log("Running PyInstaller:\n")
-        log(subprocess.list2cmdline(command) + "\n\n")
+        log(format_command(command) + "\n\n")
 
         result = run_command(command, log, cwd=config.source.parent)
 
     if result != 0:
-        raise BuildError("PyInstaller failed. Check the log output above.")
+        raise BuildError("PyInstaller failed. Check the build log above.")
 
     return expected_exe_path(config)
 
 
 def validate_config(config: BuildConfig) -> None:
     if not config.source.is_file() or config.source.suffix.lower() != ".py":
-        raise BuildError("Choose a valid .py file.")
+        raise BuildError("Choose a valid Python file ending in .py.")
 
     if not config.output.is_dir():
         raise BuildError("Choose a valid output folder.")
 
     if config.icon and (not config.icon.is_file() or config.icon.suffix.lower() != ".ico"):
-        raise BuildError("Choose a valid .ico file for the icon.")
+        raise BuildError("Choose a valid .ico file for the EXE icon.")
 
     if config.name and has_bad_filename_char(config.name):
-        raise BuildError("The app name contains a character Windows cannot use in file names.")
+        raise BuildError("The EXE name contains a character Windows cannot use in file names.")
 
     for item in config.data_items:
         if not item.source.exists():
@@ -75,7 +75,7 @@ def validate_config(config: BuildConfig) -> None:
 
         destination = Path(item.destination.strip() or ".")
         if destination.is_absolute() or ".." in destination.parts:
-            raise BuildError("Data destinations must be relative folders inside the app.")
+            raise BuildError("Data destinations must be relative folders inside the EXE.")
 
     parse_extra_args(config.extra_args)
 
@@ -84,8 +84,12 @@ def has_bad_filename_char(value: str) -> bool:
     return any(char in value for char in '<>:"/\\|?*')
 
 
+def pyinstaller_available() -> bool:
+    return importlib.util.find_spec("PyInstaller") is not None
+
+
 def ensure_pyinstaller(log: LogHandler) -> None:
-    if importlib.util.find_spec("PyInstaller") is not None:
+    if pyinstaller_available():
         log("PyInstaller found.\n")
         return
 
@@ -97,7 +101,7 @@ def ensure_pyinstaller(log: LogHandler) -> None:
 
     importlib.invalidate_caches()
 
-    if importlib.util.find_spec("PyInstaller") is None:
+    if not pyinstaller_available():
         raise BuildError("PyInstaller was installed, but Python still cannot load it.")
 
     log("PyInstaller installed.\n")
@@ -142,6 +146,16 @@ def pyinstaller_command(config: BuildConfig, temp_dir: Path) -> List[str]:
     command.append(str(config.source))
 
     return command
+
+
+def command_preview(config: BuildConfig) -> str:
+    validate_config(config)
+    command = pyinstaller_command(config, Path("pyinstaller-temp"))
+    return format_command(command)
+
+
+def format_command(command: List[str]) -> str:
+    return subprocess.list2cmdline(command)
 
 
 def parse_extra_args(value: str) -> List[str]:

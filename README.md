@@ -1,6 +1,6 @@
 ﻿# Python to EXE Converter
 
-A clean Windows GUI for turning Python scripts into `.exe` files with PyInstaller.
+A clean Windows GUI for turning Python files into `.exe` files with PyInstaller.
 
 ## Setup
 
@@ -18,20 +18,18 @@ python -m pip install pyinstaller
 python py_to_exe_converter.py
 ```
 
-Pick a script, output folder, app name, icon, build mode, and any advanced options you need.
+Choose a Python file, output folder, EXE name, optional icon, and build mode. Advanced options let you add hidden imports, data files, folders, or extra PyInstaller options.
 
-## Options
+## Extras
 
-- `.ico` icon for the final EXE
-- one-file or folder build
-- console or windowed mode
-- hidden imports
-- added data files or folders
-- extra PyInstaller arguments
+- Check Setup shows your Python and PyInstaller status.
+- Copy Build Command copies the PyInstaller command to your clipboard.
+- Open Output Folder opens the selected output folder.
+- Save Log stores the build log as a text file.
 
 ## Quick fixes
 
 - `python` not found: reinstall Python with PATH enabled or try `py`.
-- EXE closes instantly: build as a console app and read the error.
+- EXE closes instantly: build with **Console window visible** and read the error.
 - Missing module: install it with `python -m pip install package-name`.
-- Missing assets: add them in **Data files** or use `--add-data`.
+- Missing assets: add them under **Files or folders your app needs**.

@@ -48,8 +48,7 @@ class ConverterApp(ttk.Frame):
 
     def configure_window(self) -> None:
         self.master.title("Python to EXE Converter")
-        self.master.geometry("980x740")
-        self.master.minsize(860, 660)
+        self.size_window_to_screen()
         self.master.configure(bg="#eef2f7")
         self.master.option_add("*Font", "{Segoe UI} 10")
 
@@ -76,7 +75,30 @@ class ConverterApp(ttk.Frame):
 
         self.pack(fill="both", expand=True)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1)
+        self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=2)
+
+    def size_window_to_screen(self) -> None:
+        self.master.update_idletasks()
+        screen_width = self.master.winfo_screenwidth()
+        screen_height = self.master.winfo_screenheight()
+        available_width = max(screen_width - 80, 760)
+        available_height = max(screen_height - 100, 620)
+        width = min(max(1180, int(screen_width * 0.86)), available_width)
+        height = min(max(820, int(screen_height * 0.88)), available_height)
+        x = max((screen_width - width) // 2, 0)
+        y = max((screen_height - height) // 2, 0)
+
+        self.master.geometry(f"{width}x{height}+{x}+{y}")
+        self.master.minsize(min(1040, width), min(720, height))
+        self.master.after(120, self.maximize_window)
+
+    def maximize_window(self) -> None:
+        if sys.platform == "win32":
+            try:
+                self.master.state("zoomed")
+            except tk.TclError:
+                pass
 
     def create_widgets(self) -> None:
         self.create_header()
@@ -182,7 +204,7 @@ class ConverterApp(ttk.Frame):
         ttk.Button(toolbar, text="Clear Log", command=self.clear_log).grid(row=0, column=1, padx=(8, 0))
         ttk.Button(toolbar, text="Save Log", command=self.save_log).grid(row=0, column=2, padx=(6, 0))
 
-        self.log_box = ScrolledText(frame, wrap="word", height=12, relief="flat", bd=0, bg="#0f172a", fg="#e5e7eb", insertbackground="#ffffff", font=("Cascadia Mono", 9))
+        self.log_box = ScrolledText(frame, wrap="word", height=9, relief="flat", bd=0, bg="#0f172a", fg="#e5e7eb", insertbackground="#ffffff", font=("Cascadia Mono", 9))
         self.log_box.grid(row=1, column=0, sticky="nsew")
 
     def create_status_bar(self) -> None:
@@ -400,4 +422,5 @@ def main() -> None:
     root = tk.Tk()
     ConverterApp(root)
     root.mainloop()
+
 
